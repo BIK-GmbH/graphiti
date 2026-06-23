@@ -34,8 +34,14 @@ jobs:
           git push origin refs/remotes/upstream/main:refs/heads/automated/upstream-sync --force
 
       - name: Open or refresh the upstream PR (never auto-merge)
+        # NOTE: the default GITHUB_TOKEN cannot create PRs when the enterprise
+        # policy "Allow GitHub Actions to create and approve pull requests" is
+        # disabled (the case for BIK-GmbH today). Fix without an enterprise
+        # change: add a repo secret UPSTREAM_SYNC_TOKEN = a fine-grained PAT
+        # with Contents:write + Pull requests:write on this fork. The step
+        # falls back to github.token so the rest of the job still runs.
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN || github.token }}
         run: |
           OPEN=$(gh pr list --base bik/main --head automated/upstream-sync --state open --json number --jq 'length')
           if [ "$OPEN" = "0" ]; then
