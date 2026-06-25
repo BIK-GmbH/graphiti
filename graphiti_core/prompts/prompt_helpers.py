@@ -20,6 +20,24 @@ from typing import Any
 DO_NOT_ESCAPE_UNICODE = '\nDo not escape unicode characters.\n'
 
 
+class _Neo4jJSONEncoder(json.JSONEncoder):
+    """JSON encoder that handles Neo4j temporal types (DateTime/Date/Time).
+
+    BIK fork patch (#470): the stock encoder raises ``TypeError`` on Neo4j
+    ``DateTime`` objects, which reach ``dedupe_nodes`` through existing-node
+    attributes. Anything exposing ``isoformat()`` serializes via that; other
+    Neo4j temporals fall back to ``str()``. Upstream-PR candidate (weak-spot W9).
+    """
+
+    def default(self, obj: Any) -> Any:
+        isoformat = getattr(obj, 'isoformat', None)
+        if callable(isoformat):
+            return isoformat()
+        if type(obj).__name__ in ('DateTime', 'Date', 'Time'):
+            return str(obj)
+        return super().default(obj)
+
+
 def to_prompt_json(data: Any, ensure_ascii: bool = False, indent: int | None = None) -> str:
     """
     Serialize data to JSON for use in prompts.
@@ -37,4 +55,4 @@ def to_prompt_json(data: Any, ensure_ascii: bool = False, indent: int | None = N
         are preserved in their original form in the prompt, making them readable
         in LLM logs and improving model understanding.
     """
-    return json.dumps(data, ensure_ascii=ensure_ascii, indent=indent)
+    return json.dumps(data, ensure_ascii=ensure_ascii, indent=indent, cls=_Neo4jJSONEncoder)
