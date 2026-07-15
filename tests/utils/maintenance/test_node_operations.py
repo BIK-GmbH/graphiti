@@ -478,6 +478,13 @@ def test_resolve_with_similarity_multiple_exact_matches_defers_to_llm():
 
 @pytest.mark.asyncio
 async def test_resolve_with_llm_candidate_attributes_cannot_overwrite_candidate_id(monkeypatch):
+    # BIK #773: these upstream cases use abbreviation-extension merges
+    # ('Dizzy' -> 'Dizzy Gillespie') which the BIK family/variant guard
+    # rejects by default — disable it to keep testing upstream mechanics.
+    monkeypatch.setattr(
+        'graphiti_core.utils.maintenance.node_operations._REJECT_NAME_EXTENSION_MERGES',
+        False,
+    )
     """Ensure candidate.attributes with a 'candidate_id' key cannot corrupt the LLM context."""
     candidate = EntityNode(name='Dizzy Gillespie', group_id='group', labels=['Entity'])
     candidate.attributes = {'candidate_id': 999, 'genre': 'jazz'}
@@ -526,6 +533,13 @@ async def test_resolve_with_llm_candidate_attributes_cannot_overwrite_candidate_
 
 @pytest.mark.asyncio
 async def test_resolve_with_llm_updates_unresolved(monkeypatch):
+    # BIK #773: these upstream cases use abbreviation-extension merges
+    # ('Dizzy' -> 'Dizzy Gillespie') which the BIK family/variant guard
+    # rejects by default — disable it to keep testing upstream mechanics.
+    monkeypatch.setattr(
+        'graphiti_core.utils.maintenance.node_operations._REJECT_NAME_EXTENSION_MERGES',
+        False,
+    )
     extracted = EntityNode(name='Dizzy', group_id='group', labels=['Entity'])
     candidate = EntityNode(name='Dizzy Gillespie', group_id='group', labels=['Entity'])
 
@@ -662,6 +676,13 @@ async def test_resolve_with_llm_ignores_out_of_range_relative_ids(monkeypatch, c
 
 @pytest.mark.asyncio
 async def test_resolve_with_llm_ignores_duplicate_relative_ids(monkeypatch):
+    # BIK #773: these upstream cases use abbreviation-extension merges
+    # ('Dizzy' -> 'Dizzy Gillespie') which the BIK family/variant guard
+    # rejects by default — disable it to keep testing upstream mechanics.
+    monkeypatch.setattr(
+        'graphiti_core.utils.maintenance.node_operations._REJECT_NAME_EXTENSION_MERGES',
+        False,
+    )
     extracted = EntityNode(name='Dizzy', group_id='group', labels=['Entity'])
     candidate = EntityNode(name='Dizzy Gillespie', group_id='group', labels=['Entity'])
 
@@ -1007,3 +1028,44 @@ async def test_resolve_nodes_prompt_scopes_candidates_per_entity(monkeypatch):
     # each entity lists exactly its own single candidate
     assert '"candidate_ids": [0]' in prompt_text.replace('\n', ' ')
     assert '"candidate_ids": [1]' in prompt_text.replace('\n', ' ')
+
+
+@pytest.mark.asyncio
+async def test_resolve_nodes_rejects_family_variant_collapse(monkeypatch):
+    """BIK #773 v2: merging a variant onto its family node (name-extension
+    pair) must be rejected — one such merge cascades all later variant facts
+    onto the family node."""
+    clients, llm_generate = _make_clients()
+    llm_generate.return_value = {
+        'entity_resolutions': [
+            {'id': 0, 'name': 'MAGDOS LK/LP', 'duplicate_candidate_id': 0},
+        ]
+    }
+
+    family_candidate = EntityNode(name='MAGDOS', group_id='group', labels=['Entity'])
+    extracted = EntityNode(name='MAGDOS LK/LP', group_id='group', labels=['Entity'])
+
+    monkeypatch.setattr(
+        'graphiti_core.utils.maintenance.node_operations._semantic_candidate_search',
+        _semantic_candidates([[family_candidate]]),
+    )
+
+    resolved, uuid_map, _ = await resolve_extracted_nodes(
+        clients,
+        [extracted],
+        episode=_make_episode(),
+        previous_episodes=[],
+    )
+
+    assert resolved[0].uuid == extracted.uuid
+    assert uuid_map[extracted.uuid] == extracted.uuid
+
+
+def test_is_name_extension_pair_variants():
+    from graphiti_core.utils.maintenance.dedup_helpers import _is_name_extension_pair
+
+    assert _is_name_extension_pair('MAGDOS', 'MAGDOS LK/LP')
+    assert _is_name_extension_pair('MEMDOS MR', 'MEMDOS')
+    assert not _is_name_extension_pair('MAGDOS', 'MAGDOS')  # identical
+    assert not _is_name_extension_pair('NYC', 'New York City')  # abbreviation, no token prefix
+    assert not _is_name_extension_pair('MAGDOS LK', 'MAGDOS LP')  # siblings, same length

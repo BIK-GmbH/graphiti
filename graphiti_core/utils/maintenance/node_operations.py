@@ -45,9 +45,11 @@ from graphiti_core.search.search_utils import node_similarity_search
 from graphiti_core.utils.datetime_utils import utc_now
 from graphiti_core.utils.maintenance.attribute_utils import apply_capped_attributes
 from graphiti_core.utils.maintenance.dedup_helpers import (
+    _REJECT_NAME_EXTENSION_MERGES,
     DedupCandidateIndexes,
     DedupResolutionState,
     _build_candidate_indexes,
+    _is_name_extension_pair,
     _normalize_string_exact,
     _promote_resolved_node,
     _resolve_with_similarity,
@@ -660,6 +662,21 @@ async def _resolve_with_llm(
                 extracted_node.name,
                 candidates_by_id[duplicate_candidate_id].name,
                 sorted(allowed_candidate_ids[relative_id]),
+            )
+            resolved_node = extracted_node
+        elif _REJECT_NAME_EXTENSION_MERGES and _is_name_extension_pair(
+            extracted_node.name, candidates_by_id[duplicate_candidate_id].name
+        ):
+            # BIK (#773 v2): family/variant collapse guard — one name extends
+            # the other with qualifier tokens ("MAGDOS" vs "MAGDOS LK/LP").
+            # A single such merge cascades every later fact of the variant
+            # onto the family node.
+            logger.warning(
+                "Rejecting name-extension merge for extracted node %s ('%s' -> '%s'): "
+                'looks like a product family/variant pair; treating as no duplicate.',
+                extracted_node.uuid,
+                extracted_node.name,
+                candidates_by_id[duplicate_candidate_id].name,
             )
             resolved_node = extracted_node
         else:

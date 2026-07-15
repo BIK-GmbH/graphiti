@@ -151,6 +151,9 @@ Each entity in ENTITIES carries its own `candidate_ids` list: these are the ONLY
 NEVER mark entities as duplicates if:
 - They are related but distinct.
 - They have similar names or purposes but refer to separate instances or concepts.
+- One name extends the other with model/variant/qualifier tokens (e.g. "ACME 100"
+  vs "ACME", "MAGDOS LK/LP" vs "MAGDOS"): that is a product family and its
+  specific variant — related but distinct, NOT duplicates.
 
 Task:
 ENTITIES contains {len(context['extracted_nodes'])} entities with IDs 0 through {len(context['extracted_nodes']) - 1}.

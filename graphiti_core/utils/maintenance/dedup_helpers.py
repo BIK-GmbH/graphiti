@@ -53,6 +53,29 @@ def _normalize_name_for_fuzzy(name: str) -> str:
     return re.sub(r'[\s]+', ' ', normalized)
 
 
+# BIK (#773 v2): env-gated guard against family/variant collapse. When one
+# name is a strict token-extension of the other ("MAGDOS" vs "MAGDOS LK/LP",
+# "MEMDOS" vs "MEMDOS MR"), the pair is a product family plus its variant —
+# merging them cascades every subsequent fact of the variant onto the family
+# node. Default ON in the BIK line; conversational-memory deployments where
+# "Sam" -> "Sam Smith" merges are desirable can disable it.
+_REJECT_NAME_EXTENSION_MERGES = os.getenv(
+    'NODE_DEDUP_REJECT_NAME_EXTENSION', '1'
+).lower() not in ('0', 'false', 'no')
+
+
+def _is_name_extension_pair(name_a: str, name_b: str) -> bool:
+    """True when one normalized name equals the other plus additional qualifier tokens."""
+    tokens_a = _normalize_name_for_fuzzy(name_a).split()
+    tokens_b = _normalize_name_for_fuzzy(name_b).split()
+    if not tokens_a or not tokens_b or tokens_a == tokens_b:
+        return False
+    shorter, longer = sorted((tokens_a, tokens_b), key=len)
+    if len(shorter) == len(longer):
+        return False
+    return longer[: len(shorter)] == shorter
+
+
 def _name_entropy(normalized_name: str) -> float:
     """Approximate text specificity using Shannon entropy over characters.
 
