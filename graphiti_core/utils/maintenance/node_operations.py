@@ -15,6 +15,7 @@ limitations under the License.
 """
 
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from time import time
 from typing import Any
@@ -61,8 +62,12 @@ logger = logging.getLogger(__name__)
 
 # Maximum number of nodes to summarize in a single LLM call
 MAX_NODES = 30
-NODE_DEDUP_CANDIDATE_LIMIT = 15
-NODE_DEDUP_COSINE_MIN_SCORE = 0.6
+# BIK (#773): tightened defaults, env-overridable. Upstream defaults (15 /
+# 0.6) keep every candidate list in a grown group_id full of unrelated
+# high-degree "magnet" nodes, which feeds the LLM mis-resolution guarded
+# against in _resolve_with_llm below.
+NODE_DEDUP_CANDIDATE_LIMIT = int(os.getenv('NODE_DEDUP_CANDIDATE_LIMIT', '5'))
+NODE_DEDUP_COSINE_MIN_SCORE = float(os.getenv('NODE_DEDUP_COSINE_MIN_SCORE', '0.75'))
 
 NodeSummaryFilter = Callable[[EntityNode], Awaitable[bool]]
 
@@ -472,11 +477,20 @@ async def _resolve_with_llm(
     episode: EpisodicNode | None,
     previous_episodes: list[EpisodicNode] | None,
     entity_types: dict[str, type[BaseModel]] | None,
+    candidate_nodes_by_extracted: list[list[EntityNode]] | None = None,
 ) -> None:
     """Escalate unresolved nodes to the dedupe prompt so the LLM can select or reject duplicates.
 
     The guardrails below defensively ignore malformed or duplicate LLM responses so the
     ingestion workflow remains deterministic even when the model misbehaves.
+
+    BIK (#773): ``candidate_nodes_by_extracted`` (aligned with ``extracted_nodes``)
+    scopes each entity to its OWN duplicate candidates. Historically the prompt
+    offered one flat union of every entity's candidates and any in-range pick was
+    accepted — in grown graphs the model routinely resolved an entity onto another
+    entity's candidate, silently rewiring all of its edges onto an unrelated node.
+    With scoping, the prompt tells the model which candidate_ids are admissible per
+    entity, and picks outside that set are rejected (treated as "no duplicate").
     """
     if not state.unresolved_indices:
         return
@@ -485,12 +499,32 @@ async def _resolve_with_llm(
 
     llm_extracted_nodes = [extracted_nodes[i] for i in state.unresolved_indices]
 
+    # Map candidate uuid -> global candidate_id, then build the admissible
+    # candidate_id set per unresolved entity (relative id order).
+    candidate_id_by_uuid: dict[str, int] = {
+        node.uuid: i for i, node in enumerate(indexes.existing_nodes)
+    }
+    allowed_candidate_ids: list[set[int]] = []
+    for relative_idx, original_index in enumerate(state.unresolved_indices):
+        if candidate_nodes_by_extracted is None:
+            # Legacy behaviour: every candidate is admissible for every entity.
+            allowed_candidate_ids.append(set(candidate_id_by_uuid.values()))
+        else:
+            allowed_candidate_ids.append(
+                {
+                    candidate_id_by_uuid[c.uuid]
+                    for c in candidate_nodes_by_extracted[original_index]
+                    if c.uuid in candidate_id_by_uuid
+                }
+            )
+
     extracted_nodes_context = [
         {
             'id': i,
             'name': node.name,
             'entity_type': node.labels,
             'entity_type_description': _get_entity_type_description(node.labels, entity_types_dict),
+            'candidate_ids': sorted(allowed_candidate_ids[i]),
         }
         for i, node in enumerate(llm_extracted_nodes)
     ]
@@ -606,17 +640,32 @@ async def _resolve_with_llm(
         resolved_node: EntityNode
         if duplicate_candidate_id < 0:
             resolved_node = extracted_node
-        elif duplicate_candidate_id in candidates_by_id:
-            resolved_node = _promote_resolved_node(
-                extracted_node, candidates_by_id[duplicate_candidate_id]
-            )
-        else:
+        elif duplicate_candidate_id not in candidates_by_id:
             logger.warning(
                 'Invalid duplicate_candidate_id %d for extracted node %s; treating as no duplicate.',
                 duplicate_candidate_id,
                 extracted_node.uuid,
             )
             resolved_node = extracted_node
+        elif duplicate_candidate_id not in allowed_candidate_ids[relative_id]:
+            # BIK (#773): in-range pick, but the candidate belongs to a
+            # DIFFERENT entity's candidate list — accepting it is exactly the
+            # mis-resolution that rewires edges onto unrelated magnet nodes.
+            logger.warning(
+                "Rejecting cross-entity duplicate_candidate_id %d for extracted node %s "
+                "('%s' -> '%s'): candidate is not in this entity's own candidate set %s; "
+                'treating as no duplicate.',
+                duplicate_candidate_id,
+                extracted_node.uuid,
+                extracted_node.name,
+                candidates_by_id[duplicate_candidate_id].name,
+                sorted(allowed_candidate_ids[relative_id]),
+            )
+            resolved_node = extracted_node
+        else:
+            resolved_node = _promote_resolved_node(
+                extracted_node, candidates_by_id[duplicate_candidate_id]
+            )
 
         state.resolved_nodes[original_index] = resolved_node
         state.uuid_map[extracted_node.uuid] = resolved_node.uuid
@@ -686,6 +735,7 @@ async def resolve_extracted_nodes(
             episode,
             previous_episodes,
             entity_types,
+            candidate_nodes_by_extracted=candidate_nodes_by_extracted,
         )
 
     if not state.unresolved_indices and not any(candidate_nodes_by_extracted):

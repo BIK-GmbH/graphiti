@@ -918,3 +918,92 @@ async def test_batch_summaries_calls_llm_for_long_summary():
     # LLM should have been called to condense the long summary
     llm_client.generate_response.assert_awaited_once()
     assert node.summary == 'Condensed summary'
+
+
+@pytest.mark.asyncio
+async def test_resolve_nodes_rejects_cross_entity_candidate(monkeypatch):
+    """BIK #773: an in-range candidate pick that belongs to ANOTHER entity's
+    candidate list must be rejected (treated as no duplicate) instead of
+    silently rewiring the entity onto an unrelated node."""
+    clients, llm_generate = _make_clients()
+    llm_generate.return_value = {
+        'entity_resolutions': [
+            {
+                'id': 0,
+                'name': 'Joe',
+                # cross-entity pick: candidate_id 1 is Java's candidate, not Joe's
+                'duplicate_candidate_id': 1,
+            },
+            {
+                'id': 1,
+                'name': 'Java',
+                'duplicate_candidate_id': 1,
+            },
+        ]
+    }
+
+    joe_candidate = EntityNode(name='Joseph', group_id='group', labels=['Entity'])
+    java_candidate_1 = EntityNode(name='Java', group_id='group', labels=['Entity'])
+    java_candidate_2 = EntityNode(name='Java', group_id='group', labels=['Entity'])
+    extracted_nodes = [
+        EntityNode(name='Joe', group_id='group', labels=['Entity']),
+        EntityNode(name='Java', group_id='group', labels=['Entity']),
+    ]
+
+    monkeypatch.setattr(
+        'graphiti_core.utils.maintenance.node_operations._semantic_candidate_search',
+        _semantic_candidates([[joe_candidate], [java_candidate_1, java_candidate_2]]),
+    )
+
+    resolved, uuid_map, _ = await resolve_extracted_nodes(
+        clients,
+        extracted_nodes,
+        episode=_make_episode(),
+        previous_episodes=[],
+    )
+
+    # Joe's cross-entity pick is rejected -> stays a new node
+    assert resolved[0].uuid == extracted_nodes[0].uuid
+    assert uuid_map[extracted_nodes[0].uuid] == extracted_nodes[0].uuid
+    # Java's own-candidate pick still resolves
+    assert resolved[1].uuid == java_candidate_1.uuid
+
+
+@pytest.mark.asyncio
+async def test_resolve_nodes_prompt_scopes_candidates_per_entity(monkeypatch):
+    """BIK #773: the dedupe prompt must tell the model which candidate_ids are
+    admissible per entity."""
+    clients, llm_generate = _make_clients()
+    llm_generate.return_value = {
+        'entity_resolutions': [
+            {'id': 0, 'name': 'Joe', 'duplicate_candidate_id': -1},
+            {'id': 1, 'name': 'Ann', 'duplicate_candidate_id': -1},
+        ]
+    }
+
+    # both pairs are non-exact and low-entropy so BOTH entities escalate to the LLM
+    joe_candidate = EntityNode(name='Joseph', group_id='group', labels=['Entity'])
+    ann_candidate = EntityNode(name='Annie', group_id='group', labels=['Entity'])
+    extracted_nodes = [
+        EntityNode(name='Joe', group_id='group', labels=['Entity']),
+        EntityNode(name='Ann', group_id='group', labels=['Entity']),
+    ]
+
+    monkeypatch.setattr(
+        'graphiti_core.utils.maintenance.node_operations._semantic_candidate_search',
+        _semantic_candidates([[joe_candidate], [ann_candidate]]),
+    )
+
+    await resolve_extracted_nodes(
+        clients,
+        extracted_nodes,
+        episode=_make_episode(),
+        previous_episodes=[],
+    )
+
+    messages = llm_generate.call_args[0][0]
+    prompt_text = ' '.join(m.content for m in messages)
+    assert 'candidate_ids' in prompt_text
+    # each entity lists exactly its own single candidate
+    assert '"candidate_ids": [0]' in prompt_text.replace('\n', ' ')
+    assert '"candidate_ids": [1]' in prompt_text.replace('\n', ' ')

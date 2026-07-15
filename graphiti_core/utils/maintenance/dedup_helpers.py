@@ -17,6 +17,7 @@ limitations under the License.
 from __future__ import annotations
 
 import math
+import os
 import re
 from collections import defaultdict
 from collections.abc import Iterable
@@ -31,7 +32,10 @@ if TYPE_CHECKING:
 _NAME_ENTROPY_THRESHOLD = 1.5
 _MIN_NAME_LENGTH = 6
 _MIN_TOKEN_COUNT = 2
-_FUZZY_JACCARD_THRESHOLD = 0.9
+# BIK (#773): raised from 0.9 (env-overridable). At 0.9, long boilerplate-heavy
+# spec-string names that differ in a single digit ("…5-45 °C" vs "…5-40 °C")
+# exceed the 3-gram Jaccard and deterministically merge distinct entities.
+_FUZZY_JACCARD_THRESHOLD = float(os.getenv('NODE_DEDUP_FUZZY_JACCARD', '0.95'))
 _MINHASH_PERMUTATIONS = 32
 _MINHASH_BAND_SIZE = 4
 

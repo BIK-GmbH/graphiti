@@ -144,6 +144,10 @@ Each of the above ENTITIES was extracted from the CURRENT MESSAGE.
 For each entity, determine if it is a duplicate of any EXISTING ENTITY.
 Entities should only be considered duplicates if they refer to the *same real-world object or concept*.
 
+Each entity in ENTITIES carries its own `candidate_ids` list: these are the ONLY
+`candidate_id` values admissible for that entity. Candidates outside an entity's
+`candidate_ids` belong to other entities and MUST NOT be chosen for it.
+
 NEVER mark entities as duplicates if:
 - They are related but distinct.
 - They have similar names or purposes but refer to separate instances or concepts.
@@ -155,7 +159,7 @@ Your response MUST include EXACTLY {len(context['extracted_nodes'])} resolutions
 For every entity, provide:
 - `id`: integer id from ENTITIES
 - `name`: the best full name for the entity (preserve the original name unless a duplicate has a more complete name)
-- `duplicate_candidate_id`: the `candidate_id` of the EXISTING ENTITY that is the best duplicate match, or -1 if there is no duplicate
+- `duplicate_candidate_id`: the `candidate_id` of the EXISTING ENTITY that is the best duplicate match — it MUST be one of this entity's own `candidate_ids` — or -1 if there is no duplicate
 
 <EXAMPLE>
 ENTITY: "Sam" (Person)
