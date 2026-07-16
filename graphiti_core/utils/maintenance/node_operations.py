@@ -70,6 +70,15 @@ MAX_NODES = 30
 # against in _resolve_with_llm below.
 NODE_DEDUP_CANDIDATE_LIMIT = int(os.getenv('NODE_DEDUP_CANDIDATE_LIMIT', '5'))
 NODE_DEDUP_COSINE_MIN_SCORE = float(os.getenv('NODE_DEDUP_COSINE_MIN_SCORE', '0.75'))
+# BIK (#773 v3): entity types (labels) that may ONLY merge on an exact
+# normalized-name match — never fuzzy, never via the LLM. Identifier-like
+# types (norm/standard codes, document IDs) are embedding-space neighbours
+# of their siblings ("EN 809" vs "DIN EN ISO 7751"), which made them the
+# most stable mis-merge class across all bench runs. Comma-separated label
+# list, e.g. 'Standard,TechnicalDocument'.
+NODE_DEDUP_EXACT_ONLY_TYPES = frozenset(
+    t.strip() for t in os.getenv('NODE_DEDUP_EXACT_ONLY_TYPES', '').split(',') if t.strip()
+)
 
 NodeSummaryFilter = Callable[[EntityNode], Awaitable[bool]]
 
@@ -719,6 +728,20 @@ async def resolve_extracted_nodes(
             continue
 
         indexes = _build_candidate_indexes(candidates)
+
+        # BIK (#773 v3): identifier-like types resolve on exact name only.
+        if NODE_DEDUP_EXACT_ONLY_TYPES and NODE_DEDUP_EXACT_ONLY_TYPES.intersection(node.labels):
+            exact_matches = indexes.normalized_existing.get(
+                _normalize_string_exact(node.name), []
+            )
+            if exact_matches:
+                resolved = _promote_resolved_node(node, exact_matches[0])
+                _commit_resolution(
+                    state, resolved, {node.uuid: resolved.uuid}, [(node, resolved)], idx
+                )
+            # No exact match -> stays a new node; never escalate these
+            # types to fuzzy matching or the LLM.
+            continue
         local_state = DedupResolutionState(
             resolved_nodes=[None], uuid_map={}, unresolved_indices=[]
         )

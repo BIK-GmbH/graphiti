@@ -1069,3 +1069,62 @@ def test_is_name_extension_pair_variants():
     assert not _is_name_extension_pair('MAGDOS', 'MAGDOS')  # identical
     assert not _is_name_extension_pair('NYC', 'New York City')  # abbreviation, no token prefix
     assert not _is_name_extension_pair('MAGDOS LK', 'MAGDOS LP')  # siblings, same length
+
+
+@pytest.mark.asyncio
+async def test_exact_only_types_never_reach_fuzzy_or_llm(monkeypatch):
+    """BIK #773 v3: identifier-like types (norms, doc IDs) merge on exact
+    normalized name only — similar-name candidates must stay separate and
+    the LLM must not be consulted."""
+    monkeypatch.setattr(
+        'graphiti_core.utils.maintenance.node_operations.NODE_DEDUP_EXACT_ONLY_TYPES',
+        frozenset({'Standard'}),
+    )
+    clients, llm_generate = _make_clients()
+
+    similar_norm = EntityNode(name='DIN EN ISO 7751', group_id='group', labels=['Entity', 'Standard'])
+    extracted = EntityNode(name='EN 809:1998', group_id='group', labels=['Entity', 'Standard'])
+
+    monkeypatch.setattr(
+        'graphiti_core.utils.maintenance.node_operations._semantic_candidate_search',
+        _semantic_candidates([[similar_norm]]),
+    )
+
+    resolved, uuid_map, _ = await resolve_extracted_nodes(
+        clients,
+        [extracted],
+        episode=_make_episode(),
+        previous_episodes=[],
+    )
+
+    assert resolved[0].uuid == extracted.uuid
+    assert uuid_map[extracted.uuid] == extracted.uuid
+    llm_generate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_exact_only_types_merge_on_exact_name(monkeypatch):
+    monkeypatch.setattr(
+        'graphiti_core.utils.maintenance.node_operations.NODE_DEDUP_EXACT_ONLY_TYPES',
+        frozenset({'Standard'}),
+    )
+    clients, llm_generate = _make_clients()
+
+    existing = EntityNode(name='EN 809:1998', group_id='group', labels=['Entity', 'Standard'])
+    extracted = EntityNode(name='EN 809:1998', group_id='group', labels=['Entity', 'Standard'])
+
+    monkeypatch.setattr(
+        'graphiti_core.utils.maintenance.node_operations._semantic_candidate_search',
+        _semantic_candidates([[existing]]),
+    )
+
+    resolved, uuid_map, _ = await resolve_extracted_nodes(
+        clients,
+        [extracted],
+        episode=_make_episode(),
+        previous_episodes=[],
+    )
+
+    assert resolved[0].uuid == existing.uuid
+    assert uuid_map[extracted.uuid] == existing.uuid
+    llm_generate.assert_not_awaited()
