@@ -730,7 +730,15 @@ async def resolve_extracted_nodes(
         indexes = _build_candidate_indexes(candidates)
 
         # BIK (#773 v3): identifier-like types resolve on exact name only.
-        if NODE_DEDUP_EXACT_ONLY_TYPES and NODE_DEDUP_EXACT_ONLY_TYPES.intersection(node.labels):
+        # '*' applies the policy to every entity type — LLM node dedupe is
+        # then effectively disabled and only exact-name merges remain
+        # (#773 v4: in component-dense technical docs the LLM's
+        # similar-but-distinct merges caused more damage than its
+        # synonym/abbreviation merges recovered).
+        if NODE_DEDUP_EXACT_ONLY_TYPES and (
+            '*' in NODE_DEDUP_EXACT_ONLY_TYPES
+            or NODE_DEDUP_EXACT_ONLY_TYPES.intersection(node.labels)
+        ):
             exact_matches = indexes.normalized_existing.get(
                 _normalize_string_exact(node.name), []
             )

@@ -1128,3 +1128,37 @@ async def test_exact_only_types_merge_on_exact_name(monkeypatch):
     assert resolved[0].uuid == existing.uuid
     assert uuid_map[extracted.uuid] == existing.uuid
     llm_generate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_exact_only_wildcard_disables_llm_dedupe(monkeypatch):
+    """BIK #773 v4: NODE_DEDUP_EXACT_ONLY_TYPES='*' -> every type resolves
+    on exact name only; similar names stay separate without LLM."""
+    monkeypatch.setattr(
+        'graphiti_core.utils.maintenance.node_operations.NODE_DEDUP_EXACT_ONLY_TYPES',
+        frozenset({'*'}),
+    )
+    clients, llm_generate = _make_clients()
+
+    similar = EntityNode(name='Druckhalteventil', group_id='group', labels=['Entity'])
+    exact = EntityNode(name='Fußventil', group_id='group', labels=['Entity'])
+    extracted = [
+        EntityNode(name='Fußventil', group_id='group', labels=['Entity']),      # exact match -> merge
+        EntityNode(name='Fussventil Typ FC', group_id='group', labels=['Entity']),  # similar -> new
+    ]
+
+    monkeypatch.setattr(
+        'graphiti_core.utils.maintenance.node_operations._semantic_candidate_search',
+        _semantic_candidates([[exact], [similar, exact]]),
+    )
+
+    resolved, uuid_map, _ = await resolve_extracted_nodes(
+        clients,
+        extracted,
+        episode=_make_episode(),
+        previous_episodes=[],
+    )
+
+    assert resolved[0].uuid == exact.uuid
+    assert resolved[1].uuid == extracted[1].uuid
+    llm_generate.assert_not_awaited()
