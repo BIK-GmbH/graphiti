@@ -46,6 +46,23 @@ def _normalize_string_exact(name: str) -> str:
     return normalized.strip()
 
 
+def _normalize_string_relaxed(name: str) -> str:
+    """BIK (#773 v4.1): exact-match key that tolerates cosmetic name variants.
+
+    Used only by the exact-only resolution path as a second lookup after the
+    strict key. Unifies unicode dashes, treats hyphen and space as equal,
+    strips trailing punctuation ('Warnung!' == 'Warnung') and drops a
+    leading 'DIN ' before EN/ISO norm codes ('DIN EN 61000-6-2' ==
+    'EN 61000-6-2'). Distinct codes/designations stay distinct.
+    """
+    normalized = re.sub(r'[‐-―−]', '-', name.lower())
+    normalized = re.sub(r'[-_/]+', ' ', normalized)
+    normalized = re.sub(r'[!?.,;:]+$', '', normalized.strip())
+    normalized = re.sub(r'[\s]+', ' ', normalized).strip()
+    normalized = re.sub(r'^din (en|iso)\b', r'\1', normalized)
+    return normalized
+
+
 def _normalize_name_for_fuzzy(name: str) -> str:
     """Produce a fuzzier form that keeps alphanumerics and apostrophes for n-gram shingles."""
     normalized = re.sub(r"[^a-z0-9' ]", ' ', _normalize_string_exact(name))

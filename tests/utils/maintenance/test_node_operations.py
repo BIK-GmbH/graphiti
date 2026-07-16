@@ -1162,3 +1162,40 @@ async def test_exact_only_wildcard_disables_llm_dedupe(monkeypatch):
     assert resolved[0].uuid == exact.uuid
     assert resolved[1].uuid == extracted[1].uuid
     llm_generate.assert_not_awaited()
+
+
+def test_normalize_string_relaxed_variants():
+    from graphiti_core.utils.maintenance.dedup_helpers import _normalize_string_relaxed as rx
+
+    assert rx('ATE-Stellantrieb') == rx('ATE Stellantrieb')
+    assert rx('Warnung!') == rx('Warnung')
+    assert rx('DIN EN 61000-6-2:2005') == rx('EN 61000‑6‑2:2005')  # incl. unicode hyphen
+    assert rx('EN 61000-6-2:2005') != rx('EN 61000-6-3:2005')      # distinct codes stay distinct
+    assert rx('FLOWCON LP 1') != rx('FLOWCON LP2')                  # different designations
+
+
+@pytest.mark.asyncio
+async def test_exact_only_relaxed_key_merges_cosmetic_variants(monkeypatch):
+    monkeypatch.setattr(
+        'graphiti_core.utils.maintenance.node_operations.NODE_DEDUP_EXACT_ONLY_TYPES',
+        frozenset({'*'}),
+    )
+    clients, llm_generate = _make_clients()
+
+    existing = EntityNode(name='ATE Stellantrieb', group_id='group', labels=['Entity'])
+    extracted = EntityNode(name='ATE-Stellantrieb', group_id='group', labels=['Entity'])
+
+    monkeypatch.setattr(
+        'graphiti_core.utils.maintenance.node_operations._semantic_candidate_search',
+        _semantic_candidates([[existing]]),
+    )
+
+    resolved, uuid_map, _ = await resolve_extracted_nodes(
+        clients,
+        [extracted],
+        episode=_make_episode(),
+        previous_episodes=[],
+    )
+
+    assert resolved[0].uuid == existing.uuid
+    llm_generate.assert_not_awaited()

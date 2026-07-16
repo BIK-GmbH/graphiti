@@ -51,6 +51,7 @@ from graphiti_core.utils.maintenance.dedup_helpers import (
     _build_candidate_indexes,
     _is_name_extension_pair,
     _normalize_string_exact,
+    _normalize_string_relaxed,
     _promote_resolved_node,
     _resolve_with_similarity,
 )
@@ -742,6 +743,15 @@ async def resolve_extracted_nodes(
             exact_matches = indexes.normalized_existing.get(
                 _normalize_string_exact(node.name), []
             )
+            if not exact_matches:
+                # v4.1: second lookup with the relaxed key — catches cosmetic
+                # variants (hyphen/space, trailing '!', DIN prefix) without
+                # reopening semantic merging.
+                relaxed_key = _normalize_string_relaxed(node.name)
+                exact_matches = [
+                    c for c in candidates
+                    if _normalize_string_relaxed(c.name) == relaxed_key
+                ]
             if exact_matches:
                 resolved = _promote_resolved_node(node, exact_matches[0])
                 _commit_resolution(
