@@ -15,6 +15,7 @@ limitations under the License.
 """
 
 import logging
+import os
 from datetime import datetime
 from time import time
 
@@ -47,6 +48,19 @@ from graphiti_core.utils.maintenance.dedup_helpers import _normalize_string_exac
 from graphiti_core.utils.text_utils import concatenate_episodes
 
 logger = logging.getLogger(__name__)
+
+# BIK (#773 v5 / failure mode F9): when enabled, edge dedupe merges ONLY on
+# the verbatim fast path (identical endpoints + identical normalized fact).
+# The LLM routinely declares DISTINCT facts between the same endpoint pair
+# duplicates — the merge keeps the existing fact and silently drops the new
+# one. With stable node identity (exact-only node dedupe) this discarded
+# whole spec tables (11/15 core facts of one manual). Also skips LLM-driven
+# contradiction/invalidation (see #335b false-positive cascades).
+EDGE_DEDUP_EXACT_ONLY = os.getenv('EDGE_DEDUP_EXACT_ONLY', '').lower() in (
+    '1',
+    'true',
+    'yes',
+)
 
 
 def build_episodic_edges(
@@ -693,6 +707,14 @@ async def resolve_extracted_edge(
             if episode is not None and episode.uuid not in resolved.episodes:
                 resolved.episodes.append(episode.uuid)
             return resolved, [], []
+
+    if EDGE_DEDUP_EXACT_ONLY:
+        # BIK (#773 v5): beyond the verbatim fast path the new fact is kept
+        # as its own edge — re-enter via the no-candidates path so attribute
+        # and timestamp extraction still run.
+        return await resolve_extracted_edge(
+            llm_client, extracted_edge, [], [], episode, edge_type_candidates
+        )
 
     start = time()
 

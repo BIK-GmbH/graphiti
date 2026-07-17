@@ -6,6 +6,7 @@ import pytest
 from pydantic import BaseModel
 
 from graphiti_core.edges import EntityEdge
+from graphiti_core.utils.datetime_utils import utc_now
 from graphiti_core.nodes import EntityNode, EpisodicNode
 from graphiti_core.search.search_config import SearchResults
 from graphiti_core.utils.maintenance.edge_operations import (
@@ -771,3 +772,48 @@ async def test_resolve_extracted_edge_overcap_attribute_preserves_prior(monkeypa
     assert resolved.attributes['is_current'] == 'true'
     assert dupes == []
     assert invalidated == []
+
+
+@pytest.mark.asyncio
+async def test_edge_dedup_exact_only_keeps_distinct_facts(monkeypatch):
+    """BIK #773 v5 (F9): with EDGE_DEDUP_EXACT_ONLY, a DIFFERENT fact between
+    the same endpoints must be kept as a new edge (no LLM dedupe/drop);
+    a verbatim-identical fact still merges via the fast path."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from graphiti_core.edges import EntityEdge
+    from graphiti_core.utils.maintenance import edge_operations as eo
+    from graphiti_core.utils.maintenance.edge_operations import resolve_extracted_edge
+
+    monkeypatch.setattr(eo, 'EDGE_DEDUP_EXACT_ONLY', True)
+
+    llm_client = MagicMock()
+    llm_client.generate_response = AsyncMock(
+        side_effect=AssertionError('LLM must not be called in exact-only mode')
+    )
+
+    existing = EntityEdge(
+        source_node_uuid='s1', target_node_uuid='t1', name='HAS_SPEC',
+        fact='PDS 80 hat ein Speichervolumen von 80 cm³.',
+        group_id='g', created_at=utc_now(), episodes=[],
+    )
+    new_distinct = EntityEdge(
+        source_node_uuid='s1', target_node_uuid='t1', name='HAS_SPEC',
+        fact='PDS 80 hat einen maximalen Betriebsdruck von 10 bar.',
+        group_id='g', created_at=utc_now(), episodes=[],
+    )
+    resolved, duplicates, invalidated = await resolve_extracted_edge(
+        llm_client, new_distinct, [existing], [], None, None
+    )
+    assert resolved.uuid == new_distinct.uuid  # kept, not dropped
+    assert not duplicates and not invalidated
+
+    verbatim = EntityEdge(
+        source_node_uuid='s1', target_node_uuid='t1', name='HAS_SPEC',
+        fact='PDS 80 hat ein Speichervolumen von 80 cm³.',
+        group_id='g', created_at=utc_now(), episodes=[],
+    )
+    resolved2, _, _ = await resolve_extracted_edge(
+        llm_client, verbatim, [existing], [], None, None
+    )
+    assert resolved2.uuid == existing.uuid  # fast path still merges
