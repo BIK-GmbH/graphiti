@@ -29,11 +29,18 @@ Full context (failure modes, bench harness, decision log) lives in
    → LLM node dedupe disabled, v4)
 5. `feat: relaxed second-lookup key for exact-only resolution` (cdb_tqs#773 v4.1)
    — cosmetic variants (hyphen/space, trailing punctuation, DIN prefix)
+6. `feat: EDGE_DEDUP_EXACT_ONLY — keep distinct facts between identical
+   endpoints` (cdb_tqs#773 v5, fixes F9) — edge merge only via the verbatim
+   fast-path; LLM fact-dedupe **and contradiction-invalidation** are disabled
+   (consumers must clear stale edges themselves on document re-processing)
 
-Validation status: coherence AC met with `'*'` (0.38% incoherent @ 25 docs,
-20x better than unpatched) — but a recall regression via edge-dedupe fact
-dropping (F9, see cdb_tqs `docs/GRAPHITI.md`) blocks rollout; v5 (exact-only
-edge-fact dedupe) pending.
+Validation status (2026-07-17, independently re-verified 2026-07-21/22 —
+full adversarial scan of every edge + source-fidelity samples + inverse
+coverage): **rollout AC met with the full stack v1–v5.**
+gpt-5: 0.74% clearly-incoherent (4/542), recall canary 20/25.
+gpt-5.4: 0.18% (4/2282) at 4x edge density, recall 16/25.
+Zero number hallucinations in either run. Down from 9–10% unpatched and a
+7.5% production baseline. Details: cdb_tqs `docs/GRAPHITI.md` §4/§5/§7.
 
 ## Upgrade runbook (new upstream release X.Y.Z)
 
