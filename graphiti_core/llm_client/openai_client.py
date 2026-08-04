@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import os
 import typing
 
 from openai import AsyncOpenAI
@@ -22,6 +23,22 @@ from pydantic import BaseModel
 
 from .config import DEFAULT_MAX_TOKENS, LLMConfig
 from .openai_base_client import DEFAULT_REASONING, DEFAULT_VERBOSITY, BaseOpenAIClient
+
+
+def _force_reasoning_model() -> bool:
+    """BIK #843/F12: treat the model as a reasoning model regardless of its name.
+
+    Azure/gateway deployments are addressed by a tier alias (e.g. ``"high"`` /
+    ``"low"``), not the underlying gpt-5 id, so the ``startswith('gpt-5'|'o1'|
+    'o3')`` checks below can't tell they ARE reasoning models. The reasoning
+    effort (and verbosity) then silently never ships and the API falls back to
+    its own default (medium) — a regression vs. graphiti 0.22, which forwarded
+    the configured effort unconditionally. This opt-in flag, read at call time
+    (no import-timing trap), restores that behaviour. See BIK-FORK.md.
+    """
+    return os.getenv('GRAPHITI_FORCE_REASONING_MODEL', '').strip().lower() in (
+        '1', 'true', 'yes', 'on'
+    )
 
 
 class OpenAIClient(BaseOpenAIClient):
@@ -76,6 +93,7 @@ class OpenAIClient(BaseOpenAIClient):
         # Reasoning models (gpt-5 family) don't support temperature
         is_reasoning_model = (
             model.startswith('gpt-5') or model.startswith('o1') or model.startswith('o3')
+            or _force_reasoning_model()  # BIK #843/F12: Azure/gateway tier aliases
         )
 
         request_kwargs = {
@@ -118,6 +136,7 @@ class OpenAIClient(BaseOpenAIClient):
         # Reasoning models (gpt-5 family, o1, o3) reject temperature.
         is_reasoning_model = (
             model.startswith('gpt-5') or model.startswith('o1') or model.startswith('o3')
+            or _force_reasoning_model()  # BIK #843/F12: Azure/gateway tier aliases
         )
 
         request_kwargs: dict[str, typing.Any] = {

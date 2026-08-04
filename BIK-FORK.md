@@ -33,6 +33,19 @@ Full context (failure modes, bench harness, decision log) lives in
    endpoints` (cdb_tqs#773 v5, fixes F9) — edge merge only via the verbatim
    fast-path; LLM fact-dedupe **and contradiction-invalidation** are disabled
    (consumers must clear stale edges themselves on document re-processing)
+7. `feat: GRAPHITI_FORCE_REASONING_MODEL — treat tier-alias deployments as
+   reasoning models` (cdb_tqs#843, F12) — upstream 0.29 gates the reasoning
+   effort/verbosity behind `model.startswith('gpt-5'|'o1'|'o3')`
+   (`openai_client.py`, both `_create_structured_completion` and
+   `_create_completion`). Azure/gateway deployments are addressed by a tier
+   alias (`"high"`/`"low"`), so the gate is always False → the configured
+   effort silently never ships and the API falls back to its default
+   (`medium`) — a regression vs. 0.22, which forwarded it unconditionally.
+   Env flag (read at call time, no import-timing trap) forces the gate open.
+   **Known limitation:** effort resolution keys on the alias string, so it
+   cannot detect a gpt-5.5 deployment (which needs `'none'`, rejects
+   `'minimal'`); safe for the current gpt-5 / gpt-5-nano deployments (both
+   accept `'minimal'`). A real alias→model-family lookup is a follow-up.
 
 Validation status (2026-07-17, independently re-verified 2026-07-21/22 —
 full adversarial scan of every edge + source-fidelity samples + inverse
