@@ -46,6 +46,16 @@ Full context (failure modes, bench harness, decision log) lives in
    cannot detect a gpt-5.5 deployment (which needs `'none'`, rejects
    `'minimal'`); safe for the current gpt-5 / gpt-5-nano deployments (both
    accept `'minimal'`). A real alias→model-family lookup is a follow-up.
+8. `feat: keep node summaries in the source language` (cdb_tqs#864) — the
+   summary prompts never receive `custom_extraction_instructions`, so on
+   German documents the LLM summary path drifted to English (~16–26 % of
+   summaries measured on the LJ chlorine KA, while facts — which do carry the
+   cdb_tqs extraction directive — were at 0 %). Adds a source-language rule to
+   `summary_instructions` (snippets.py; also marks the English example as
+   format-only) and to `_entity_episode_summary_system_prompt`
+   (extract_nodes.py). No new env knob — the rule is universal (keep the
+   source language); fact/name language stays governed by the env-configurable
+   extraction instructions in cdb_tqs.
 
 Validation status (2026-07-17, independently re-verified 2026-07-21/22 —
 full adversarial scan of every edge + source-fidelity samples + inverse

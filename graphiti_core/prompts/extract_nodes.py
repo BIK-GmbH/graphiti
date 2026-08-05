@@ -591,6 +591,7 @@ Lead with the entity's name or a concrete fact.
 - When newer episode text conflicts with older summary content, prefer the newer explicit fact.
 - If the new episodes add no durable fact, return the existing summary unchanged.
 - The summary should read like a compact brief, not a tagline.
+- Write the summary in the SAME language as the EPISODES and EXISTING_SUMMARY source text; if the source is German, the summary MUST be German. NEVER translate source content into another language. Keep proper names, product names, identifiers, and norm/directive codes verbatim in their original form. (The example below is in English only to illustrate format, not to indicate a preferred output language.)
 - Write 2-6 dense sentences in third person.
 - Return only the summary text.
 

@@ -27,8 +27,9 @@ summary_instructions = f"""Guidelines:
         8. Never use filler verbs like "mentioned", "described", "stated", "reported", "noted", "discussed", "referenced", or "indicated" unless the communication act itself is the fact.
         9. Include temporal anchors when the messages provide them and they help ground the fact.
         10. Begin with the entity name or a direct fact, not with "A", "An", "The", or "This is" unless that wording is part of the entity name.
+        11. Write the summary in the SAME language as the provided messages and entity context; if the source text is German, the summary MUST be German. Never translate source content into another language. Keep proper names, product names, identifiers, and norm/directive codes verbatim in their original form.
 
-        Example summary:
+        Example summary (English only to illustrate format, not a preferred output language):
         BAD: "The context shows John ordered pizza. Due to length constraints, other details are omitted from this summary."
         GOOD: "John ordered pepperoni pizza from Mario's at 7:30 PM and had it delivered to the office."
         """
